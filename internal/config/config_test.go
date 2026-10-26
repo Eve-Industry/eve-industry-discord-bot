@@ -40,3 +40,16 @@ func TestLoadMissingToken(t *testing.T) {
 		t.Fatal("Load succeeded without DISCORD_TOKEN")
 	}
 }
+
+func TestLoadRejectsIncompleteRole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := "guild_id: 123\nroles:\n  self_assign:\n    - id: 5\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DISCORD_TOKEN", "test-token")
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load accepted a self-assign role with no name")
+	}
+}
