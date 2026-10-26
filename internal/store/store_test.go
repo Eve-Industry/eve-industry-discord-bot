@@ -120,3 +120,32 @@ func TestSettingsVersioning(t *testing.T) {
 		t.Errorf("audit actions = %v, want %v (failed saves must not be logged)", actions, want)
 	}
 }
+
+func TestDeleteAdminRemovesSessionsAndCodes(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0)
+
+	a, err := s.CreateAdmin(ctx, "pilot@example.com", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateAdmin(ctx, "PILOT@example.com", now); !errors.Is(err, ErrConflict) {
+		t.Errorf("duplicate email in other case: err = %v, want ErrConflict", err)
+	}
+	if err := s.CreateSession(ctx, Session{IDHash: "h", AdminID: a.ID, State: SessionFull, CSRF: "c", CreatedAt: now, LastSeen: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceRecoveryCodes(ctx, a.ID, []string{"x", "y"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAdmin(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetSession(ctx, "h"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("session survived its admin: err = %v", err)
+	}
+	if n, _ := s.RecoveryCodesLeft(ctx, a.ID); n != 0 {
+		t.Errorf("%d recovery codes survived their admin", n)
+	}
+}

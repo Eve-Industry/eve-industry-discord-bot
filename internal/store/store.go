@@ -75,14 +75,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 // Open opens (or creates) the database at path and applies the schema.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create schema: %w", err)
+	for _, sch := range []string{schema, adminSchema} {
+		if _, err := db.Exec(sch); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("create schema: %w", err)
+		}
 	}
 	return &Store{db: db}, nil
 }

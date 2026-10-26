@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/admin"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/bot"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/config"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/esi"
@@ -27,7 +29,16 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to the YAML config file")
+	flag.Usage = usage
 	flag.Parse()
+
+	if args := flag.Args(); len(args) > 0 {
+		if err := runCommand(*configPath, args, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	if err := run(*configPath, logger); err != nil {
@@ -50,10 +61,31 @@ func run(configPath string, logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 
 	live, err := settings.Load(ctx, db, cfg.Settings, logger)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
+	}
+
+	adminCfg, adminOn, err := admin.ConfigFromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("admin dashboard: %w", err)
+	}
+	if adminOn {
+		srv, err := admin.New(adminCfg, db, live, logger)
+		if err != nil {
+			return fmt.Errorf("admin dashboard: %w", err)
+		}
+		if err := admin.Bootstrap(ctx, db, adminCfg, logger); err != nil {
+			return err
+		}
+		go func() {
+			if err := srv.Run(ctx); err != nil {
+				cancel(err)
+			}
+		}()
 	}
 
 	b := bot.New(cfg, logger,
@@ -66,7 +98,11 @@ func run(configPath string, logger *slog.Logger) error {
 		faq.New(db, logger),
 		market.New(esi.New(esi.DefaultURL, userAgent(cfg)), logger),
 	)
-	return b.Run(ctx)
+	err = b.Run(ctx)
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	return err
 }
 
 // userAgent identifies the bot to ESI, as CCP asks, so they can reach the

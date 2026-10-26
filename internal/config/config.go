@@ -102,8 +102,21 @@ type Channels struct {
 
 // Load reads the YAML file at path and the DISCORD_TOKEN environment variable.
 func Load(path string) (Config, error) {
-	var cfg Config
+	cfg, err := LoadFile(path)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Token = os.Getenv("DISCORD_TOKEN")
+	if err := cfg.validate(); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
 
+// LoadFile reads only the YAML file, without the token or checks, for
+// commands that just need the database.
+func LoadFile(path string) (Config, error) {
+	var cfg Config
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("read %s: %w", path, err)
@@ -111,13 +124,8 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
-
-	cfg.Token = os.Getenv("DISCORD_TOKEN")
 	if cfg.Database == "" {
 		cfg.Database = "bot.db"
-	}
-	if err := cfg.validate(); err != nil {
-		return cfg, err
 	}
 	return cfg, nil
 }

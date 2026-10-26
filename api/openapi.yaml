@@ -1,0 +1,544 @@
+openapi: 3.1.0
+info:
+  title: EVE Industry Discord Bot admin API
+  version: 1.0.0
+  description: |
+    The API behind the admin dashboard. Admins sign in with an email and
+    password, then an authenticator app code. The session lives in an
+    HttpOnly cookie; every request that changes something must also send the
+    session's CSRF token in the X-CSRF-Token header and come from the
+    dashboard's own origin.
+
+    Snowflake IDs (channels, roles) are strings of digits; "0" means unset.
+
+servers:
+  - url: /
+
+security:
+  - session: []
+
+tags:
+  - name: auth
+  - name: me
+  - name: settings
+  - name: admins
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness check
+      security: []
+      responses:
+        "200":
+          description: The server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Check email and password
+      description: |
+        Starts a session that still needs a second factor: state
+        `pending_2fa`, or `setup_2fa` if the admin has no authenticator yet.
+        Failures are limited per email (5 in 15 minutes) and per client
+        address (10 in 15 minutes).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              additionalProperties: false
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/State" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: End this session
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /auth/verify:
+    post:
+      tags: [auth]
+      summary: Pass the second factor
+      description: |
+        Send an authenticator `code` or one `recovery_code`. Finishes
+        sign-in from `pending_2fa`, and from `full` it refreshes the
+        5-minute step-up window that inviting, resetting and removing admins
+        or changing your password need. The session cookie is replaced.
+        Five wrong codes end the session; ten within an hour lock the
+        account until another admin resets it.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code: { type: string, pattern: "^[0-9 ]{6,7}$" }
+                recovery_code: { type: string }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/State"
+                  - type: object
+                    properties:
+                      recovery_codes_left: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /auth/invite/check:
+    post:
+      tags: [auth]
+      summary: Look up an invite
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteToken" }
+      responses:
+        "200":
+          description: The invite is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /auth/invite/accept:
+    post:
+      tags: [auth]
+      summary: Set a password from an invite
+      description: |
+        Uses up the invite, sets the password (12 to 128 characters, not a
+        known leaked password) and starts a session in `setup_2fa`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              additionalProperties: false
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 12, maxLength: 128 }
+      responses:
+        "200": { $ref: "#/components/responses/State" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /auth/totp/setup:
+    post:
+      tags: [auth]
+      summary: Start authenticator setup
+      description: Returns a new secret to scan. It is only used once confirmed.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      responses:
+        "200":
+          description: Scan this.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret: { type: string, description: Base32, for typing in by hand. }
+                  uri: { type: string, description: otpauth link. }
+                  qr_code: { type: string, description: PNG data URL of the link. }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /auth/totp/confirm:
+    post:
+      tags: [auth]
+      summary: Confirm authenticator setup with its first code
+      description: Finishes sign-in and returns 10 recovery codes, shown only once.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              additionalProperties: false
+              properties:
+                code: { type: string }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/State"
+                  - type: object
+                    properties:
+                      recovery_codes:
+                        type: array
+                        items: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/me:
+    get:
+      tags: [me]
+      summary: Who is signed in, and how far
+      description: Works in every session state, so the dashboard knows which screen to show.
+      responses:
+        "200":
+          description: The current admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/me/password:
+    post:
+      tags: [me]
+      summary: Change your password
+      description: Needs a fresh second factor. Signs out your other sessions.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              additionalProperties: false
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 12, maxLength: 128 }
+      responses:
+        "204": { description: Changed. }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/me/recovery-codes:
+    post:
+      tags: [me]
+      summary: Replace your recovery codes
+      description: Needs a fresh second factor. The old codes stop working.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      responses:
+        "200":
+          description: New codes, shown only once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recovery_codes:
+                    type: array
+                    items: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/settings:
+    get:
+      tags: [settings]
+      summary: Current channels, roles and welcome text
+      responses:
+        "200":
+          description: The live settings and their version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsDoc" }
+    put:
+      tags: [settings]
+      summary: Save settings
+      description: |
+        Send back the version you loaded. If someone saved since, the answer
+        is 409 with their settings under `current`. Changes apply at once.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettingsDoc" }
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsDoc" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409":
+          description: Someone else saved first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      current: { $ref: "#/components/schemas/SettingsDoc" }
+
+  /api/v1/audit:
+    get:
+      tags: [admins]
+      summary: Recent changes and sign-ins, newest first
+      responses:
+        "200":
+          description: Up to 200 entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+
+  /api/v1/admins:
+    get:
+      tags: [admins]
+      summary: List admins
+      responses:
+        "200":
+          description: Every admin, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admins:
+                    type: array
+                    items: { $ref: "#/components/schemas/Admin" }
+
+  /api/v1/admins/invites:
+    post:
+      tags: [admins]
+      summary: Invite an admin
+      description: Needs a fresh second factor. Returns a 24-hour link to send them.
+      parameters: [{ $ref: "#/components/parameters/CSRF" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "201": { $ref: "#/components/responses/Invite" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admins/{id}/reset:
+    post:
+      tags: [admins]
+      summary: Reset another admin's password and authenticator
+      description: |
+        Needs a fresh second factor. Signs them out, unlocks them, and
+        returns a new 24-hour invite link to send them.
+      parameters:
+        - { $ref: "#/components/parameters/AdminID" }
+        - { $ref: "#/components/parameters/CSRF" }
+      responses:
+        "200": { $ref: "#/components/responses/Invite" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admins/{id}:
+    delete:
+      tags: [admins]
+      summary: Remove another admin
+      description: Needs a fresh second factor.
+      parameters:
+        - { $ref: "#/components/parameters/AdminID" }
+        - { $ref: "#/components/parameters/CSRF" }
+      responses:
+        "204": { description: Removed. }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-admin_session
+
+  parameters:
+    CSRF:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      description: The `csrf` value from sign-in or /api/v1/me.
+      schema: { type: string }
+    AdminID:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    State:
+      description: Where sign-in stands.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/State" }
+    Invite:
+      description: A link to send to the person.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              link: { type: string }
+              expires_at: { type: string, format: date-time }
+    Error:
+      description: Something was wrong; `error` is safe to show.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, error]
+      properties:
+        code:
+          type: string
+          description: |
+            Machine-readable reason, for example bad_credentials, wrong_code,
+            rate_limited, locked, second_factor_required,
+            totp_setup_required, step_up_required, csrf, origin, conflict,
+            invalid, weak_password, invite_invalid, already_admin.
+        error: { type: string }
+        state: { $ref: "#/components/schemas/SessionState" }
+
+    SessionState:
+      type: string
+      enum: [pending_2fa, setup_2fa, full]
+
+    State:
+      type: object
+      required: [state, csrf]
+      properties:
+        state: { $ref: "#/components/schemas/SessionState" }
+        csrf: { type: string }
+
+    InviteToken:
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token: { type: string, description: The part of the invite link after "#". }
+
+    Me:
+      type: object
+      required: [id, email, state, csrf]
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        state: { $ref: "#/components/schemas/SessionState" }
+        csrf: { type: string }
+        recovery_codes_left: { type: integer }
+        step_up_until:
+          type: string
+          format: date-time
+          description: Until when admin changes work without another code.
+
+    Snowflake:
+      type: string
+      pattern: "^[0-9]+$"
+
+    SettingsDoc:
+      type: object
+      required: [version, settings]
+      additionalProperties: false
+      properties:
+        version: { type: integer }
+        settings: { $ref: "#/components/schemas/Settings" }
+
+    Settings:
+      type: object
+      required: [channels, roles, welcome]
+      additionalProperties: false
+      properties:
+        channels:
+          type: object
+          additionalProperties: false
+          properties:
+            general: { $ref: "#/components/schemas/Snowflake" }
+            feature_requests: { $ref: "#/components/schemas/Snowflake" }
+            bugs: { $ref: "#/components/schemas/Snowflake" }
+            self_hosting_support: { $ref: "#/components/schemas/Snowflake" }
+            tickets: { $ref: "#/components/schemas/Snowflake" }
+            mod_log: { $ref: "#/components/schemas/Snowflake" }
+            rules: { $ref: "#/components/schemas/Snowflake" }
+        roles:
+          type: object
+          additionalProperties: false
+          properties:
+            staff: { $ref: "#/components/schemas/Snowflake" }
+            member: { $ref: "#/components/schemas/Snowflake" }
+            self_assign:
+              type: [array, "null"]
+              maxItems: 25
+              items:
+                type: object
+                required: [id, name]
+                additionalProperties: false
+                properties:
+                  id: { $ref: "#/components/schemas/Snowflake" }
+                  name: { type: string, minLength: 1 }
+                  description: { type: string }
+        welcome:
+          type: object
+          additionalProperties: false
+          properties:
+            message: { type: string }
+
+    Admin:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        active: { type: boolean, description: Has a password and an authenticator. }
+        locked: { type: boolean }
+        created_at: { type: string, format: date-time }
+        you: { type: boolean }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        action: { type: string }
+        detail: { type: string }
