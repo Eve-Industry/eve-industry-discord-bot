@@ -31,13 +31,14 @@ const (
 
 // Module serves the welcome message and routing panel.
 type Module struct {
-	cfg    config.Config
-	logger *slog.Logger
+	guildID  snowflake.ID
+	settings config.Source
+	logger   *slog.Logger
 }
 
 // New returns the welcome module.
-func New(cfg config.Config, logger *slog.Logger) Module {
-	return Module{cfg: cfg, logger: logger}
+func New(guildID snowflake.ID, settings config.Source, logger *slog.Logger) Module {
+	return Module{guildID: guildID, settings: settings, logger: logger}
 }
 
 // Commands declares /setup panel and /setup rules, limited to members who
@@ -73,7 +74,7 @@ func (m Module) Register(r handler.Router) {
 // gated reports whether new members must accept the rules first. When they
 // must, the welcome is posted on accepting rather than on joining, so they
 // can see it.
-func (m Module) gated() bool { return m.cfg.Roles.Member != 0 }
+func gated(s config.Settings) bool { return s.Roles.Member != 0 }
 
 // Listeners greets members when they join.
 func (m Module) Listeners() []bot.EventListener {
@@ -81,24 +82,25 @@ func (m Module) Listeners() []bot.EventListener {
 }
 
 func (m Module) onJoin(e *events.GuildMemberJoin) {
-	if e.GuildID != m.cfg.GuildID || e.Member.User.Bot || m.gated() {
+	if e.GuildID != m.guildID || e.Member.User.Bot || gated(m.settings.Settings()) {
 		return
 	}
 	m.greet(e.Client(), e.Member)
 }
 
 func (m Module) greet(client *bot.Client, member discord.Member) {
-	if m.cfg.Channels.General == 0 {
+	s := m.settings.Settings()
+	if s.Channels.General == 0 {
 		return
 	}
-	if _, err := client.Rest.CreateMessage(m.cfg.Channels.General, greeting(m.cfg, member)); err != nil {
+	if _, err := client.Rest.CreateMessage(s.Channels.General, greeting(s, member)); err != nil {
 		m.logger.Error("post welcome", "user", member.User.ID, "err", err)
 	}
 }
 
 func (m Module) postRules(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	if !m.gated() {
-		return e.CreateMessage(ephemeral("Set `roles.member` in the config first, then run this again."))
+	if !gated(m.settings.Settings()) {
+		return e.CreateMessage(ephemeral("Set the member role in the config or dashboard first, then run this again."))
 	}
 	if _, err := e.Client().Rest.CreateMessage(e.Channel().ID(), rulesGate()); err != nil {
 		m.logger.Error("post rules gate", "channel", e.Channel().ID(), "err", err)
@@ -108,22 +110,23 @@ func (m Module) postRules(_ discord.SlashCommandInteractionData, e *handler.Comm
 }
 
 func (m Module) acceptRules(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	s := m.settings.Settings()
 	member := e.Member()
-	if member == nil || !m.gated() {
+	if member == nil || !gated(s) {
 		return e.CreateMessage(ephemeral("There's nothing to accept here."))
 	}
 	for _, id := range member.RoleIDs {
-		if id == m.cfg.Roles.Member {
+		if id == s.Roles.Member {
 			return e.CreateMessage(ephemeral("You've already accepted the rules."))
 		}
 	}
-	if err := e.Client().Rest.AddMemberRole(m.cfg.GuildID, member.User.ID, m.cfg.Roles.Member); err != nil {
+	if err := e.Client().Rest.AddMemberRole(m.guildID, member.User.ID, s.Roles.Member); err != nil {
 		m.logger.Error("give member role", "user", member.User.ID, "err", err)
 		return e.CreateMessage(ephemeral("Sorry, I couldn't unlock the server for you. Please tell a staff member."))
 	}
 	m.greet(e.Client(), member.Member)
 
-	p := panel(m.cfg)
+	p := panel(m.guildID, s)
 	p.Content = "Thanks! The server is unlocked."
 	p.Flags = discord.MessageFlagEphemeral
 	return e.CreateMessage(p)
@@ -140,7 +143,7 @@ func rulesGate() discord.MessageCreate {
 }
 
 func (m Module) postPanel(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	if _, err := e.Client().Rest.CreateMessage(e.Channel().ID(), panel(m.cfg)); err != nil {
+	if _, err := e.Client().Rest.CreateMessage(e.Channel().ID(), panel(m.guildID, m.settings.Settings())); err != nil {
 		m.logger.Error("post panel", "channel", e.Channel().ID(), "err", err)
 		return e.CreateMessage(ephemeral("I couldn't post here. Check that I can send messages in this channel."))
 	}
@@ -148,16 +151,16 @@ func (m Module) postPanel(_ discord.SlashCommandInteractionData, e *handler.Comm
 }
 
 func (m Module) showPanel(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	p := panel(m.cfg)
+	p := panel(m.guildID, m.settings.Settings())
 	p.Flags = discord.MessageFlagEphemeral
 	return e.CreateMessage(p)
 }
 
 // greeting is the message posted in #general when someone joins.
-func greeting(cfg config.Config, member discord.Member) discord.MessageCreate {
-	text := cfg.Welcome.Message
+func greeting(s config.Settings, member discord.Member) discord.MessageCreate {
+	text := s.Welcome.Message
 	if text == "" {
-		text = fmt.Sprintf(defaultMessage, discord.ChannelMention(cfg.Channels.General))
+		text = fmt.Sprintf(defaultMessage, discord.ChannelMention(s.Channels.General))
 	}
 	return discord.MessageCreate{
 		Content: fmt.Sprintf("Welcome %s!", member.Mention()),
@@ -173,8 +176,8 @@ func greeting(cfg config.Config, member discord.Member) discord.MessageCreate {
 }
 
 // panel is the routing message: where to go for what, with buttons.
-func panel(cfg config.Config) discord.MessageCreate {
-	ch := cfg.Channels
+func panel(guildID snowflake.ID, s config.Settings) discord.MessageCreate {
+	ch := s.Channels
 	var lines []string
 	var links []discord.InteractiveComponent
 	add := func(id snowflake.ID, label, line string) {
@@ -182,7 +185,7 @@ func panel(cfg config.Config) discord.MessageCreate {
 			return
 		}
 		lines = append(lines, fmt.Sprintf("- %s: %s", discord.ChannelMention(id), line))
-		links = append(links, discord.NewLinkButton(label, channelURL(cfg.GuildID, id)))
+		links = append(links, discord.NewLinkButton(label, channelURL(guildID, id)))
 	}
 	add(ch.General, "General", "chat with everyone")
 	add(ch.SelfHostingSupport, "Self-hosting help", "help running it yourself")
@@ -198,11 +201,11 @@ func panel(cfg config.Config) discord.MessageCreate {
 	form(ch.FeatureRequests, "Request a feature", feedback.FeatureButtonID, "suggest something new")
 	form(ch.Bugs, "Report a bug", feedback.BugButtonID, "something broken? tell us here")
 
-	if ch.Tickets != 0 && cfg.Roles.Staff != 0 {
+	if ch.Tickets != 0 && s.Roles.Staff != 0 {
 		lines = append(lines, "- **Contact staff**: a private ticket only you and staff can see")
 		actions = append(actions, discord.NewSecondaryButton("Contact staff", tickets.OpenButtonID))
 	}
-	if len(cfg.Roles.SelfAssign) > 0 {
+	if len(s.Roles.SelfAssign) > 0 {
 		lines = append(lines, "- **Pick roles**: choose what you're into")
 		actions = append(actions, discord.NewSecondaryButton("Pick roles", roles.PickButtonID))
 	}

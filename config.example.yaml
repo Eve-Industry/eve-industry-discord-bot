@@ -4,6 +4,9 @@
 #
 # The bot token is NOT stored here. Set it as the DISCORD_TOKEN
 # environment variable.
+#
+# channels, roles and welcome seed the database on first start. Edits here
+# apply on restart until an admin changes them from the dashboard.
 
 guild_id: 0
 

@@ -30,14 +30,13 @@ const (
 
 // Module serves staff tickets.
 type Module struct {
-	channelID snowflake.ID
-	staffRole snowflake.ID
-	logger    *slog.Logger
+	settings config.Source
+	logger   *slog.Logger
 }
 
 // New returns the tickets module.
-func New(cfg config.Config, logger *slog.Logger) Module {
-	return Module{channelID: cfg.Channels.Tickets, staffRole: cfg.Roles.Staff, logger: logger}
+func New(settings config.Source, logger *slog.Logger) Module {
+	return Module{settings: settings, logger: logger}
 }
 
 // Commands declares no slash commands; tickets open from a button.
@@ -52,7 +51,7 @@ func (m Module) Register(r handler.Router) {
 }
 
 func (m Module) openModal(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	if m.channelID == 0 || m.staffRole == 0 {
+	if !m.ready(m.settings.Settings()) {
 		return e.CreateMessage(ephemeral("Staff tickets aren't set up yet. Please message an admin directly."))
 	}
 	return e.Modal(discord.NewModalCreate(modalID, "Contact staff",
@@ -67,6 +66,11 @@ func (m Module) openModal(_ discord.ButtonInteractionData, e *handler.ComponentE
 }
 
 func (m Module) createTicket(e *handler.ModalEvent) error {
+	s := m.settings.Settings()
+	if !m.ready(s) {
+		return e.CreateMessage(ephemeral("Staff tickets aren't set up yet. Please message an admin directly."))
+	}
+	staffRole := s.Roles.Staff
 	user := e.User()
 	topic := e.Data.Text(topicID)
 	details := e.Data.Text(detailID)
@@ -77,7 +81,7 @@ func (m Module) createTicket(e *handler.ModalEvent) error {
 	rest := e.Client().Rest
 
 	invitable := false
-	thread, err := rest.CreateThread(m.channelID, discord.GuildPrivateThreadCreate{
+	thread, err := rest.CreateThread(s.Channels.Tickets, discord.GuildPrivateThreadCreate{
 		Name:                threadName(user.Username, topic),
 		AutoArchiveDuration: discord.AutoArchiveDuration1w,
 		Invitable:           &invitable,
@@ -93,7 +97,7 @@ func (m Module) createTicket(e *handler.ModalEvent) error {
 
 	// Mentioning the staff role adds its members to the private thread.
 	_, err = rest.CreateMessage(thread.ID(), discord.MessageCreate{
-		Content: fmt.Sprintf("%s opened a ticket for %s.", user.Mention(), discord.RoleMention(m.staffRole)),
+		Content: fmt.Sprintf("%s opened a ticket for %s.", user.Mention(), discord.RoleMention(staffRole)),
 		Embeds: []discord.Embed{discord.NewEmbed().
 			WithTitle(topic).
 			WithDescription(details)},
@@ -103,7 +107,7 @@ func (m Module) createTicket(e *handler.ModalEvent) error {
 		)},
 		AllowedMentions: &discord.AllowedMentions{
 			Users: []snowflake.ID{user.ID},
-			Roles: []snowflake.ID{m.staffRole},
+			Roles: []snowflake.ID{staffRole},
 		},
 	})
 	if err != nil {
@@ -147,12 +151,18 @@ func (m Module) isStaff(e *handler.ComponentEvent) bool {
 	if member == nil {
 		return false
 	}
+	staffRole := m.settings.Settings().Roles.Staff
 	for _, id := range member.RoleIDs {
-		if id == m.staffRole {
+		if staffRole != 0 && id == staffRole {
 			return true
 		}
 	}
 	return member.Permissions.Has(discord.PermissionAdministrator)
+}
+
+// ready reports whether tickets have somewhere to go and someone to see them.
+func (Module) ready(s config.Settings) bool {
+	return s.Channels.Tickets != 0 && s.Roles.Staff != 0
 }
 
 func (m Module) followup(e *handler.ModalEvent, content string) error {
