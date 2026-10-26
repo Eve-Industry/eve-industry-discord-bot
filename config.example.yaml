@@ -13,9 +13,12 @@ channels:
   bugs: 0                  # forum
   self_hosting_support: 0  # forum
   tickets: 0               # text channel; staff tickets are private threads in it
+  mod_log: 0               # staff-only text channel for joins, leaves, role changes
+  rules: 0                 # where /setup rules posts the Accept button
 
 roles:
   staff: 0                 # sees private support tickets (admins for now)
+  member: 0                # given on Accept rules; leave 0 for no rules gate
   self_assign:             # roles members can pick for themselves (up to 25)
     # - id: 0
     #   name: Industrialist
@@ -23,3 +26,5 @@ roles:
 
 welcome:
   message: ""              # optional; leave empty for the default text
+
+database: bot.db           # SQLite file for FAQ answers

@@ -8,14 +8,27 @@ Online industry tools (market prices, blueprints, character linking).
 ## Features
 
 - **Welcome:** greets each new member in #general with a **Get started**
-  button that shows the routing panel just to them.
+  button that shows the routing panel just to them. With the rules gate on,
+  the welcome is posted when they accept the rules instead.
+- **Rules gate (optional):** `/setup rules` posts an **Accept** button.
+  Pressing it gives the `roles.member` role, which should be the role that
+  can see the rest of the server.
 - **Routing panel:** `/setup panel` (needs Manage Server) posts a "Where to
-  go" message with buttons to #general, self-hosting-support,
-  feature-requests and bugs.
+  go" message with buttons to #general and self-hosting-support, plus
+  **Request a feature** and **Report a bug** forms.
+- **Feature and bug forms:** short forms that post a tidy, consistent thread
+  in the feature-requests or bugs forum, mentioning who sent it. Staff mark
+  status with the forum's own tags.
 - **Pick roles:** a menu of the roles listed under `roles.self_assign`.
   Members tick and untick roles; other roles are never touched.
 - **Contact staff:** a form that opens a private thread only the member and
   the staff role can see, with **Claim** and **Close** buttons.
+- **FAQ:** `/faq topic:<name>` posts a saved answer, optionally mentioning
+  someone. Staff add, edit and remove answers with `/faq-admin set` and
+  `/faq-admin delete` (needs Manage Server). Answers live in the SQLite file
+  set by `database`.
+- **Mod log (optional):** joins (flagging accounts under a week old),
+  leaves and role changes are posted in `channels.mod_log`.
 - `/ping` checks the bot is online.
 
 Panel buttons for anything not configured are hidden.
@@ -43,10 +56,11 @@ Panel buttons for anything not configured are hidden.
 
    ```sh
    docker build -t eve-industry-discord-bot .
-   docker run --rm -e DISCORD_TOKEN -v "$PWD:/data" eve-industry-discord-bot
+   docker run --rm --user "$(id -u):$(id -g)" -e DISCORD_TOKEN -v "$PWD:/data" eve-industry-discord-bot
    ```
 
-5. Run `/setup panel` in #general and pin the message it posts.
+5. Run `/setup panel` in #general and pin the message it posts. If you use
+   the rules gate, run `/setup rules` in your rules channel under the rules.
 
 Never commit `config.yaml`, `.env` or your token. `config.yaml` and `.env` are already in
 `.gitignore`.
@@ -59,6 +73,7 @@ Never commit `config.yaml`, `.env` or your token. `config.yaml` and `.env` are a
 | `internal/bot` | Discord client, command sync, module wiring |
 | `internal/config` | YAML config plus `DISCORD_TOKEN` |
 | `internal/modules/<feature>` | One package per feature; each declares its commands and handlers |
+| `internal/store` | SQLite database (pure Go, no CGO) |
 
 ## Development
 
