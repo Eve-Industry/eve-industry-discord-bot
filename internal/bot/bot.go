@@ -23,6 +23,12 @@ type Module interface {
 	Register(r handler.Router)
 }
 
+// Listener is implemented by modules that react to gateway events, such as
+// a member joining.
+type Listener interface {
+	Listeners() []bot.EventListener
+}
+
 // Bot owns the Discord client and the modules it serves.
 type Bot struct {
 	cfg     config.Config
@@ -38,10 +44,14 @@ func New(cfg config.Config, logger *slog.Logger, modules ...Module) *Bot {
 // Run connects to Discord, syncs slash commands and blocks until ctx is done.
 func (b *Bot) Run(ctx context.Context) error {
 	r := handler.New()
+	listeners := []bot.EventListener{r}
 	var commands []discord.ApplicationCommandCreate
 	for _, m := range b.modules {
 		commands = append(commands, m.Commands()...)
 		m.Register(r)
+		if l, ok := m.(Listener); ok {
+			listeners = append(listeners, l.Listeners()...)
+		}
 	}
 
 	client, err := disgo.New(b.cfg.Token,
@@ -49,7 +59,7 @@ func (b *Bot) Run(ctx context.Context) error {
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
 		)),
-		bot.WithEventListeners(r),
+		bot.WithEventListeners(listeners...),
 	)
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)

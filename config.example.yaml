@@ -1,6 +1,6 @@
 # Copy to config.yaml and fill in the IDs. Turn on Developer Mode in
-# Discord (Settings > Advanced), then right-click a server or channel and
-# choose "Copy ID". Write IDs as plain numbers, without quotes.
+# Discord (Settings > Advanced), then right-click a server, channel or role
+# and choose "Copy ID". Write IDs as plain numbers, without quotes.
 #
 # The bot token is NOT stored here. Set it as the DISCORD_TOKEN
 # environment variable.
@@ -8,10 +8,18 @@
 guild_id: 0
 
 channels:
-  general: 0               # first channel new members see
+  general: 0               # first channel new members see; welcomes go here
   feature_requests: 0      # forum
   bugs: 0                  # forum
   self_hosting_support: 0  # forum
+  tickets: 0               # text channel; staff tickets are private threads in it
 
 roles:
   staff: 0                 # sees private support tickets (admins for now)
+  self_assign:             # roles members can pick for themselves (up to 25)
+    # - id: 0
+    #   name: Industrialist
+    #   description: Manufacturing, research and invention
+
+welcome:
+  message: ""              # optional; leave empty for the default text

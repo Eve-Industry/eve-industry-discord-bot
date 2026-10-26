@@ -22,12 +22,29 @@ type Config struct {
 
 	Channels Channels `yaml:"channels"`
 	Roles    Roles    `yaml:"roles"`
+	Welcome  Welcome  `yaml:"welcome"`
+}
+
+// Welcome controls the message posted when someone joins.
+type Welcome struct {
+	// Message is shown under the greeting. Empty uses the default text.
+	Message string `yaml:"message"`
 }
 
 // Roles names the roles the bot gives access to.
 type Roles struct {
 	// Staff can see private support tickets. Admins for now.
 	Staff snowflake.ID `yaml:"staff"`
+
+	// SelfAssign lists the roles members can pick for themselves.
+	SelfAssign []SelfAssignRole `yaml:"self_assign"`
+}
+
+// SelfAssignRole is one entry in the role picker.
+type SelfAssignRole struct {
+	ID          snowflake.ID `yaml:"id"`
+	Name        string       `yaml:"name"`
+	Description string       `yaml:"description"`
 }
 
 // Channels names the channels the bot welcomes into and routes to.
@@ -36,6 +53,9 @@ type Channels struct {
 	FeatureRequests    snowflake.ID `yaml:"feature_requests"`
 	Bugs               snowflake.ID `yaml:"bugs"`
 	SelfHostingSupport snowflake.ID `yaml:"self_hosting_support"`
+
+	// Tickets is a text channel. Each staff ticket is a private thread in it.
+	Tickets snowflake.ID `yaml:"tickets"`
 }
 
 // Load reads the YAML file at path and the DISCORD_TOKEN environment variable.
@@ -64,6 +84,14 @@ func (c Config) validate() error {
 	}
 	if c.GuildID == 0 {
 		errs = append(errs, errors.New("guild_id is not set"))
+	}
+	if len(c.Roles.SelfAssign) > 25 {
+		errs = append(errs, errors.New("roles.self_assign has more than 25 roles, the most a Discord menu can show"))
+	}
+	for i, r := range c.Roles.SelfAssign {
+		if r.ID == 0 || r.Name == "" {
+			errs = append(errs, fmt.Errorf("roles.self_assign[%d] needs an id and a name", i))
+		}
 	}
 	return errors.Join(errs...)
 }

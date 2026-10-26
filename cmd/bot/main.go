@@ -12,6 +12,9 @@ import (
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/bot"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/config"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/ping"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/roles"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/tickets"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/welcome"
 )
 
 func main() {
@@ -29,7 +32,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	b := bot.New(cfg, logger, ping.New())
+	b := bot.New(cfg, logger,
+		ping.New(),
+		welcome.New(cfg, logger),
+		roles.New(cfg, logger),
+		tickets.New(cfg, logger),
+	)
 	if err := b.Run(ctx); err != nil {
 		logger.Error("bot stopped", "err", err)
 		os.Exit(1)
