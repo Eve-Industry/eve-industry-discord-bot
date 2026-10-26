@@ -42,14 +42,13 @@ type field struct{ name, value string }
 
 // Module serves the bug report and feature request forms.
 type Module struct {
-	bugs     snowflake.ID
-	features snowflake.ID
+	settings config.Source
 	logger   *slog.Logger
 }
 
 // New returns the feedback module.
-func New(cfg config.Config, logger *slog.Logger) Module {
-	return Module{bugs: cfg.Channels.Bugs, features: cfg.Channels.FeatureRequests, logger: logger}
+func New(settings config.Source, logger *slog.Logger) Module {
+	return Module{settings: settings, logger: logger}
 }
 
 // Commands declares no slash commands; the forms open from panel buttons.
@@ -92,7 +91,7 @@ func (m Module) openFeatureForm(_ discord.ButtonInteractionData, e *handler.Comp
 }
 
 func (m Module) submitBug(e *handler.ModalEvent) error {
-	return m.post(e, m.bugs, "bug report", bugColor, []field{
+	return m.post(e, m.settings.Settings().Channels.Bugs, "bug report", bugColor, []field{
 		{"What happened", e.Data.Text(summaryID)},
 		{"Steps to reproduce", e.Data.Text(stepsID)},
 		{"Version and setup", e.Data.Text(setupID)},
@@ -100,7 +99,7 @@ func (m Module) submitBug(e *handler.ModalEvent) error {
 }
 
 func (m Module) submitFeature(e *handler.ModalEvent) error {
-	return m.post(e, m.features, "feature request", featureColor, []field{
+	return m.post(e, m.settings.Settings().Channels.FeatureRequests, "feature request", featureColor, []field{
 		{"Problem", e.Data.Text(problemID)},
 		{"Idea", e.Data.Text(proposalID)},
 	})

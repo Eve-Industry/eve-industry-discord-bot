@@ -67,6 +67,12 @@ Panel buttons for anything not configured are hidden.
 5. Run `/setup panel` in #general and pin the message it posts. If you use
    the rules gate, run `/setup rules` in your rules channel under the rules.
 
+The first start copies the channels, roles and welcome text from
+`config.yaml` into the database. Until an admin changes them in the admin
+dashboard (coming soon), edits to `config.yaml` are picked up on the next
+restart. After that the database copy wins and the bot logs a warning if the
+file differs.
+
 Never commit `config.yaml`, `.env` or your token. `config.yaml` and `.env` are already in
 `.gitignore`.
 
@@ -77,9 +83,10 @@ Never commit `config.yaml`, `.env` or your token. `config.yaml` and `.env` are a
 | `cmd/bot` | Entry point |
 | `internal/bot` | Discord client, command sync, module wiring |
 | `internal/config` | YAML config plus `DISCORD_TOKEN` |
+| `internal/settings` | Live channels, roles and welcome text, stored in the database and changeable while the bot runs |
 | `internal/modules/<feature>` | One package per feature; each declares its commands and handlers |
-| `internal/store` | SQLite database (pure Go, no CGO) |
 | `internal/esi` | Small cached client for EVE's public ESI API |
+| `internal/store` | SQLite database (pure Go, no CGO): FAQ answers, settings, audit log |
 
 ## Development
 

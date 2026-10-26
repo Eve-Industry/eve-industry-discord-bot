@@ -74,3 +74,49 @@ func TestSearchFAQNamesEscapesWildcards(t *testing.T) {
 		t.Errorf("search %% = %v, want [100%% cpu]", names)
 	}
 }
+
+func TestSettingsVersioning(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0)
+
+	if _, err := s.GetSettings(ctx); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetSettings before first save: err = %v, want ErrNotFound", err)
+	}
+
+	v, err := s.SaveSettings(ctx, []byte(`{"a":1}`), 0, AuditEntry{At: now, Actor: "seed", Action: "settings.seed"})
+	if err != nil || v != 1 {
+		t.Fatalf("first save = %d, %v; want 1, nil", v, err)
+	}
+	if _, err := s.SaveSettings(ctx, []byte(`{"a":9}`), 0, AuditEntry{At: now, Actor: "other"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second first-save: err = %v, want ErrConflict", err)
+	}
+
+	v, err = s.SaveSettings(ctx, []byte(`{"a":2}`), 1, AuditEntry{At: now, Actor: "admin", Action: "settings.update"})
+	if err != nil || v != 2 {
+		t.Fatalf("update = %d, %v; want 2, nil", v, err)
+	}
+	if _, err := s.SaveSettings(ctx, []byte(`{"a":3}`), 1, AuditEntry{At: now, Actor: "stale"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update: err = %v, want ErrConflict", err)
+	}
+
+	got, err := s.GetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Data) != `{"a":2}` || got.Version != 2 || got.UpdatedBy != "admin" {
+		t.Errorf("GetSettings = %s v%d by %s", got.Data, got.Version, got.UpdatedBy)
+	}
+
+	log, err := s.ListAudit(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []string
+	for _, e := range log {
+		actions = append(actions, e.Action)
+	}
+	if want := []string{"settings.update", "settings.seed"}; !slices.Equal(actions, want) {
+		t.Errorf("audit actions = %v, want %v (failed saves must not be logged)", actions, want)
+	}
+}

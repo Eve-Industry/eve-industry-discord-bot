@@ -25,14 +25,14 @@ const (
 
 // Module posts member events to the mod log channel.
 type Module struct {
-	guildID   snowflake.ID
-	channelID snowflake.ID
-	logger    *slog.Logger
+	guildID  snowflake.ID
+	settings config.Source
+	logger   *slog.Logger
 }
 
 // New returns the mod log module.
-func New(cfg config.Config, logger *slog.Logger) Module {
-	return Module{guildID: cfg.GuildID, channelID: cfg.Channels.ModLog, logger: logger}
+func New(guildID snowflake.ID, settings config.Source, logger *slog.Logger) Module {
+	return Module{guildID: guildID, settings: settings, logger: logger}
 }
 
 // Commands declares no slash commands.
@@ -41,11 +41,9 @@ func (Module) Commands() []discord.ApplicationCommandCreate { return nil }
 // Register adds no interaction handlers.
 func (Module) Register(handler.Router) {}
 
-// Listeners watches joins, leaves and member updates.
+// Listeners watches joins, leaves and member updates. They do nothing while
+// no mod log channel is set.
 func (m Module) Listeners() []bot.EventListener {
-	if m.channelID == 0 {
-		return nil
-	}
 	return []bot.EventListener{
 		bot.NewListenerFunc(m.onJoin),
 		bot.NewListenerFunc(m.onLeave),
@@ -81,7 +79,11 @@ func (m Module) onUpdate(e *events.GuildMemberUpdate) {
 }
 
 func (m Module) send(client *bot.Client, embed discord.Embed) {
-	_, err := client.Rest.CreateMessage(m.channelID, discord.MessageCreate{
+	channelID := m.settings.Settings().Channels.ModLog
+	if channelID == 0 {
+		return
+	}
+	_, err := client.Rest.CreateMessage(channelID, discord.MessageCreate{
 		Embeds:          []discord.Embed{embed},
 		AllowedMentions: &discord.AllowedMentions{},
 	})

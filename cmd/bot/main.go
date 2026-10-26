@@ -21,6 +21,7 @@ import (
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/roles"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/tickets"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/welcome"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/settings"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/store"
 )
 
@@ -50,13 +51,18 @@ func run(configPath string, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	live, err := settings.Load(ctx, db, cfg.Settings, logger)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
 	b := bot.New(cfg, logger,
 		ping.New(),
-		welcome.New(cfg, logger),
-		roles.New(cfg, logger),
-		tickets.New(cfg, logger),
-		feedback.New(cfg, logger),
-		modlog.New(cfg, logger),
+		welcome.New(cfg.GuildID, live, logger),
+		roles.New(cfg.GuildID, live, logger),
+		tickets.New(live, logger),
+		feedback.New(live, logger),
+		modlog.New(cfg.GuildID, live, logger),
 		faq.New(db, logger),
 		market.New(esi.New(esi.DefaultURL, userAgent(cfg)), logger),
 	)
