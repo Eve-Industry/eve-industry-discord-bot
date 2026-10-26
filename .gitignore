@@ -1,0 +1,11 @@
+# Local config and secrets
+config.yaml
+.env
+
+# Build output
+/bin/
+/bot
+
+# SQLite data
+*.db
+*.db-journal

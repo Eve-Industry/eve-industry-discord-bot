@@ -1,0 +1,17 @@
+# Copy to config.yaml and fill in the IDs. Turn on Developer Mode in
+# Discord (Settings > Advanced), then right-click a server or channel and
+# choose "Copy ID". Write IDs as plain numbers, without quotes.
+#
+# The bot token is NOT stored here. Set it as the DISCORD_TOKEN
+# environment variable.
+
+guild_id: 0
+
+channels:
+  general: 0               # first channel new members see
+  feature_requests: 0      # forum
+  bugs: 0                  # forum
+  self_hosting_support: 0  # forum
+
+roles:
+  staff: 0                 # sees private support tickets (admins for now)
