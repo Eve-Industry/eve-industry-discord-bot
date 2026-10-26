@@ -21,14 +21,14 @@ const selectID = "/roles/select"
 
 // Module serves the role picker.
 type Module struct {
-	guildID snowflake.ID
-	roles   []config.SelfAssignRole
-	logger  *slog.Logger
+	guildID  snowflake.ID
+	settings config.Source
+	logger   *slog.Logger
 }
 
 // New returns the roles module.
-func New(cfg config.Config, logger *slog.Logger) Module {
-	return Module{guildID: cfg.GuildID, roles: cfg.Roles.SelfAssign, logger: logger}
+func New(guildID snowflake.ID, settings config.Source, logger *slog.Logger) Module {
+	return Module{guildID: guildID, settings: settings, logger: logger}
 }
 
 // Commands declares no slash commands; the picker opens from a button.
@@ -41,7 +41,8 @@ func (m Module) Register(r handler.Router) {
 }
 
 func (m Module) openPicker(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	if len(m.roles) == 0 {
+	roles := m.settings.Settings().Roles.SelfAssign
+	if len(roles) == 0 {
 		return e.CreateMessage(ephemeral("No roles are set up to pick yet."))
 	}
 	var have []snowflake.ID
@@ -50,7 +51,7 @@ func (m Module) openPicker(_ discord.ButtonInteractionData, e *handler.Component
 	}
 	return e.CreateMessage(discord.MessageCreate{
 		Content:    "Pick the roles you want. Untick one to remove it.",
-		Components: []discord.LayoutComponent{discord.NewActionRow(pickerMenu(m.roles, have))},
+		Components: []discord.LayoutComponent{discord.NewActionRow(pickerMenu(roles, have))},
 		Flags:      discord.MessageFlagEphemeral,
 	})
 }
@@ -61,7 +62,7 @@ func (m Module) applyPicks(data discord.SelectMenuInteractionData, e *handler.Co
 		return e.CreateMessage(ephemeral("Roles can only be picked inside the server."))
 	}
 	picked := data.(discord.StringSelectMenuInteractionData).Values
-	add, remove := diff(m.roles, member.RoleIDs, picked)
+	add, remove := diff(m.settings.Settings().Roles.SelfAssign, member.RoleIDs, picked)
 
 	rest := e.Client().Rest
 	userID := member.User.ID

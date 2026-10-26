@@ -12,9 +12,10 @@ import (
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/tickets"
 )
 
-func fullConfig() config.Config {
-	return config.Config{
-		GuildID: 10,
+const guildID = 10
+
+func fullSettings() config.Settings {
+	return config.Settings{
 		Channels: config.Channels{
 			General:            11,
 			FeatureRequests:    12,
@@ -40,7 +41,7 @@ func buttons(msg discord.MessageCreate) []discord.ButtonComponent {
 }
 
 func TestPanelFull(t *testing.T) {
-	got := buttons(panel(fullConfig()))
+	got := buttons(panel(guildID, fullSettings()))
 	want := []struct{ label, target string }{
 		{"General", "https://discord.com/channels/10/11"},
 		{"Self-hosting help", "https://discord.com/channels/10/14"},
@@ -64,12 +65,12 @@ func TestPanelFull(t *testing.T) {
 }
 
 func TestPanelSkipsUnsetFeatures(t *testing.T) {
-	cfg := fullConfig()
-	cfg.Channels.Bugs = 0
-	cfg.Roles.Staff = 0
-	cfg.Roles.SelfAssign = nil
+	s := fullSettings()
+	s.Channels.Bugs = 0
+	s.Roles.Staff = 0
+	s.Roles.SelfAssign = nil
 
-	msg := panel(cfg)
+	msg := panel(guildID, s)
 	for _, b := range buttons(msg) {
 		switch b.Label {
 		case "Report a bug", "Contact staff", "Pick roles":
@@ -83,7 +84,7 @@ func TestPanelSkipsUnsetFeatures(t *testing.T) {
 
 func TestGreetingDefaultsMessage(t *testing.T) {
 	member := discord.Member{User: discord.User{ID: 42, Username: "alice"}}
-	msg := greeting(fullConfig(), member)
+	msg := greeting(fullSettings(), member)
 	if !strings.Contains(msg.Embeds[0].Description, "Say hello in <#11>") {
 		t.Errorf("description = %q, want the default message", msg.Embeds[0].Description)
 	}
@@ -100,12 +101,12 @@ func TestRulesGateHasAcceptButton(t *testing.T) {
 }
 
 func TestGatedOnlyWithMemberRole(t *testing.T) {
-	cfg := fullConfig()
-	if (Module{cfg: cfg}).gated() {
+	s := fullSettings()
+	if gated(s) {
 		t.Error("gated without roles.member")
 	}
-	cfg.Roles.Member = 30
-	if !(Module{cfg: cfg}).gated() {
+	s.Roles.Member = 30
+	if !gated(s) {
 		t.Error("not gated with roles.member set")
 	}
 }
