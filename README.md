@@ -29,6 +29,11 @@ Online industry tools (market prices, blueprints, character linking).
   set by `database`.
 - **Mod log (optional):** joins (flagging accounts under a week old),
   leaves and role changes are posted in `channels.mod_log`.
+- **Prices:** `/price item:<name>` shows the best Jita 4-4 sell and buy
+  prices, the split and order volumes. `/appraise` opens a box to paste an
+  inventory or a list like `Tritanium 1000`, and replies with the total sell
+  and buy value at Jita. Data comes from EVE's ESI API and is cached for as
+  long as ESI says (about 5 minutes). Set `esi.contact` so CCP can reach you.
 - `/ping` checks the bot is online.
 
 Panel buttons for anything not configured are hidden.
@@ -74,6 +79,7 @@ Never commit `config.yaml`, `.env` or your token. `config.yaml` and `.env` are a
 | `internal/config` | YAML config plus `DISCORD_TOKEN` |
 | `internal/modules/<feature>` | One package per feature; each declares its commands and handlers |
 | `internal/store` | SQLite database (pure Go, no CGO) |
+| `internal/esi` | Small cached client for EVE's public ESI API |
 
 ## Development
 
