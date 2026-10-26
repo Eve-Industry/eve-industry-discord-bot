@@ -15,12 +15,14 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/config"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/feedback"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/roles"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/tickets"
 )
 
 const (
-	startButtonID = "/welcome/start"
+	startButtonID  = "/welcome/start"
+	acceptButtonID = "/welcome/accept"
 
 	defaultMessage = "Glad to have you here. Say hello in %s, or use the buttons below to find help, suggest a feature or report a bug."
 
@@ -38,7 +40,8 @@ func New(cfg config.Config, logger *slog.Logger) Module {
 	return Module{cfg: cfg, logger: logger}
 }
 
-// Commands declares /setup panel, limited to members who can manage the server.
+// Commands declares /setup panel and /setup rules, limited to members who
+// can manage the server.
 func (Module) Commands() []discord.ApplicationCommandCreate {
 	return []discord.ApplicationCommandCreate{
 		discord.SlashCommandCreate{
@@ -50,16 +53,27 @@ func (Module) Commands() []discord.ApplicationCommandCreate {
 					Name:        "panel",
 					Description: "Post the routing panel in this channel",
 				},
+				discord.ApplicationCommandOptionSubCommand{
+					Name:        "rules",
+					Description: "Post the Accept rules button in this channel",
+				},
 			},
 		},
 	}
 }
 
-// Register adds the /setup panel and Get started handlers.
+// Register adds the /setup, Get started and Accept rules handlers.
 func (m Module) Register(r handler.Router) {
 	r.SlashCommand("/setup/panel", m.postPanel)
+	r.SlashCommand("/setup/rules", m.postRules)
 	r.ButtonComponent(startButtonID, m.showPanel)
+	r.ButtonComponent(acceptButtonID, m.acceptRules)
 }
+
+// gated reports whether new members must accept the rules first. When they
+// must, the welcome is posted on accepting rather than on joining, so they
+// can see it.
+func (m Module) gated() bool { return m.cfg.Roles.Member != 0 }
 
 // Listeners greets members when they join.
 func (m Module) Listeners() []bot.EventListener {
@@ -67,11 +81,61 @@ func (m Module) Listeners() []bot.EventListener {
 }
 
 func (m Module) onJoin(e *events.GuildMemberJoin) {
-	if e.GuildID != m.cfg.GuildID || m.cfg.Channels.General == 0 || e.Member.User.Bot {
+	if e.GuildID != m.cfg.GuildID || e.Member.User.Bot || m.gated() {
 		return
 	}
-	if _, err := e.Client().Rest.CreateMessage(m.cfg.Channels.General, greeting(m.cfg, e.Member)); err != nil {
-		m.logger.Error("post welcome", "user", e.Member.User.ID, "err", err)
+	m.greet(e.Client(), e.Member)
+}
+
+func (m Module) greet(client *bot.Client, member discord.Member) {
+	if m.cfg.Channels.General == 0 {
+		return
+	}
+	if _, err := client.Rest.CreateMessage(m.cfg.Channels.General, greeting(m.cfg, member)); err != nil {
+		m.logger.Error("post welcome", "user", member.User.ID, "err", err)
+	}
+}
+
+func (m Module) postRules(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+	if !m.gated() {
+		return e.CreateMessage(ephemeral("Set `roles.member` in the config first, then run this again."))
+	}
+	if _, err := e.Client().Rest.CreateMessage(e.Channel().ID(), rulesGate()); err != nil {
+		m.logger.Error("post rules gate", "channel", e.Channel().ID(), "err", err)
+		return e.CreateMessage(ephemeral("I couldn't post here. Check that I can send messages in this channel."))
+	}
+	return e.CreateMessage(ephemeral("Accept button posted. Hide your other channels from @everyone and show them to the member role."))
+}
+
+func (m Module) acceptRules(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	member := e.Member()
+	if member == nil || !m.gated() {
+		return e.CreateMessage(ephemeral("There's nothing to accept here."))
+	}
+	for _, id := range member.RoleIDs {
+		if id == m.cfg.Roles.Member {
+			return e.CreateMessage(ephemeral("You've already accepted the rules."))
+		}
+	}
+	if err := e.Client().Rest.AddMemberRole(m.cfg.GuildID, member.User.ID, m.cfg.Roles.Member); err != nil {
+		m.logger.Error("give member role", "user", member.User.ID, "err", err)
+		return e.CreateMessage(ephemeral("Sorry, I couldn't unlock the server for you. Please tell a staff member."))
+	}
+	m.greet(e.Client(), member.Member)
+
+	p := panel(m.cfg)
+	p.Content = "Thanks! The server is unlocked."
+	p.Flags = discord.MessageFlagEphemeral
+	return e.CreateMessage(p)
+}
+
+// rulesGate is the message under the rules with the Accept button.
+func rulesGate() discord.MessageCreate {
+	return discord.MessageCreate{
+		Content: "Read the rules above, then press **Accept** to unlock the rest of the server.",
+		Components: []discord.LayoutComponent{discord.NewActionRow(
+			discord.NewSuccessButton("Accept", acceptButtonID),
+		)},
 	}
 }
 
@@ -122,10 +186,18 @@ func panel(cfg config.Config) discord.MessageCreate {
 	}
 	add(ch.General, "General", "chat with everyone")
 	add(ch.SelfHostingSupport, "Self-hosting help", "help running it yourself")
-	add(ch.FeatureRequests, "Request a feature", "suggest something new")
-	add(ch.Bugs, "Report a bug", "something broken? tell us here")
 
 	var actions []discord.InteractiveComponent
+	form := func(id snowflake.ID, label, buttonID, line string) {
+		if id == 0 {
+			return
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", discord.ChannelMention(id), line))
+		actions = append(actions, discord.NewSecondaryButton(label, buttonID))
+	}
+	form(ch.FeatureRequests, "Request a feature", feedback.FeatureButtonID, "suggest something new")
+	form(ch.Bugs, "Report a bug", feedback.BugButtonID, "something broken? tell us here")
+
 	if ch.Tickets != 0 && cfg.Roles.Staff != 0 {
 		lines = append(lines, "- **Contact staff**: a private ticket only you and staff can see")
 		actions = append(actions, discord.NewSecondaryButton("Contact staff", tickets.OpenButtonID))

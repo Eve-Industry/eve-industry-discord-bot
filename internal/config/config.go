@@ -23,6 +23,9 @@ type Config struct {
 	Channels Channels `yaml:"channels"`
 	Roles    Roles    `yaml:"roles"`
 	Welcome  Welcome  `yaml:"welcome"`
+
+	// Database is the path of the SQLite file. Defaults to bot.db.
+	Database string `yaml:"database"`
 }
 
 // Welcome controls the message posted when someone joins.
@@ -35,6 +38,10 @@ type Welcome struct {
 type Roles struct {
 	// Staff can see private support tickets. Admins for now.
 	Staff snowflake.ID `yaml:"staff"`
+
+	// Member is given when someone accepts the rules. Leave it unset to
+	// turn the rules gate off.
+	Member snowflake.ID `yaml:"member"`
 
 	// SelfAssign lists the roles members can pick for themselves.
 	SelfAssign []SelfAssignRole `yaml:"self_assign"`
@@ -56,6 +63,12 @@ type Channels struct {
 
 	// Tickets is a text channel. Each staff ticket is a private thread in it.
 	Tickets snowflake.ID `yaml:"tickets"`
+
+	// ModLog is a staff-only text channel for joins, leaves and role changes.
+	ModLog snowflake.ID `yaml:"mod_log"`
+
+	// Rules holds the rules and the Accept button for the rules gate.
+	Rules snowflake.ID `yaml:"rules"`
 }
 
 // Load reads the YAML file at path and the DISCORD_TOKEN environment variable.
@@ -71,6 +84,9 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.Token = os.Getenv("DISCORD_TOKEN")
+	if cfg.Database == "" {
+		cfg.Database = "bot.db"
+	}
 	if err := cfg.validate(); err != nil {
 		return cfg, err
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/disgoorg/disgo/discord"
 
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/config"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/feedback"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/roles"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/tickets"
 )
@@ -43,8 +44,8 @@ func TestPanelFull(t *testing.T) {
 	want := []struct{ label, target string }{
 		{"General", "https://discord.com/channels/10/11"},
 		{"Self-hosting help", "https://discord.com/channels/10/14"},
-		{"Request a feature", "https://discord.com/channels/10/12"},
-		{"Report a bug", "https://discord.com/channels/10/13"},
+		{"Request a feature", feedback.FeatureButtonID},
+		{"Report a bug", feedback.BugButtonID},
 		{"Contact staff", tickets.OpenButtonID},
 		{"Pick roles", roles.PickButtonID},
 	}
@@ -88,5 +89,23 @@ func TestGreetingDefaultsMessage(t *testing.T) {
 	}
 	if !strings.Contains(msg.Content, "<@42>") {
 		t.Errorf("content %q doesn't mention the member", msg.Content)
+	}
+}
+
+func TestRulesGateHasAcceptButton(t *testing.T) {
+	got := buttons(rulesGate())
+	if len(got) != 1 || got[0].CustomID != acceptButtonID {
+		t.Fatalf("rules gate buttons = %+v, want one Accept button", got)
+	}
+}
+
+func TestGatedOnlyWithMemberRole(t *testing.T) {
+	cfg := fullConfig()
+	if (Module{cfg: cfg}).gated() {
+		t.Error("gated without roles.member")
+	}
+	cfg.Roles.Member = 30
+	if !(Module{cfg: cfg}).gated() {
+		t.Error("not gated with roles.member set")
 	}
 }
