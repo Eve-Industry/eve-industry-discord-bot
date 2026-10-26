@@ -26,6 +26,15 @@ type Config struct {
 
 	// Database is the path of the SQLite file. Defaults to bot.db.
 	Database string `yaml:"database"`
+
+	ESI ESI `yaml:"esi"`
+}
+
+// ESI holds settings for EVE Online's API.
+type ESI struct {
+	// Contact (an email or Discord name) is sent in the User-Agent so CCP
+	// can reach whoever runs this bot.
+	Contact string `yaml:"contact"`
 }
 
 // Settings are the channels, roles and texts the bot uses. Unlike the token

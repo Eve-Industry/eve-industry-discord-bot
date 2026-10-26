@@ -31,3 +31,6 @@ welcome:
   message: ""              # optional; leave empty for the default text
 
 database: bot.db           # SQLite file for FAQ answers
+
+esi:
+  contact: ""              # email or Discord name CCP can reach you at

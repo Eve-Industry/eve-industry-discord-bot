@@ -12,8 +12,10 @@ import (
 
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/bot"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/config"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/esi"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/faq"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/feedback"
+	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/market"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/modlog"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/ping"
 	"github.com/Eve-Industry/eve-industry-discord-bot/internal/modules/roles"
@@ -62,6 +64,17 @@ func run(configPath string, logger *slog.Logger) error {
 		feedback.New(live, logger),
 		modlog.New(cfg.GuildID, live, logger),
 		faq.New(db, logger),
+		market.New(esi.New(esi.DefaultURL, userAgent(cfg)), logger),
 	)
 	return b.Run(ctx)
+}
+
+// userAgent identifies the bot to ESI, as CCP asks, so they can reach the
+// operator if it misbehaves.
+func userAgent(cfg config.Config) string {
+	ua := "eve-industry-discord-bot (+https://github.com/Eve-Industry/eve-industry-discord-bot)"
+	if cfg.ESI.Contact != "" {
+		ua += " contact: " + cfg.ESI.Contact
+	}
+	return ua
 }
